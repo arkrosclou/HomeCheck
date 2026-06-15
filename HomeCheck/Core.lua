@@ -390,7 +390,11 @@ function HomeCheck:setCooldown(spellID, playerName, CDLeft, target, isRemote, te
     end
 
     if not isRemote and CDLeft == true then
-        self:SendCommMessage("HomeCheck", self:Serialize(spellID, playerName, target), "RAID")
+        if self.spells[spellID].notarget then
+            self:SendCommMessage("HomeCheck", self:Serialize(spellID, playerName), "RAID")
+        else
+            self:SendCommMessage("HomeCheck", self:Serialize(spellID, playerName, target), "RAID")
+        end
     end
 
     if self.db.global.selfignore and playerName == UnitName("player") then
@@ -986,7 +990,7 @@ function HomeCheck:getTarget(playerName, spellID)
 end
 
 function HomeCheck:setTarget(frame, target)
-    if not target or target == frame.target or self.spells[frame.spellID].notarget then
+    if not target or target == frame.target then
         return
     end
     if self.spells[frame.spellID].noself and target == frame.playerName then
