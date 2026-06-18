@@ -990,7 +990,7 @@ function HomeCheck:getTarget(playerName, spellID)
 end
 
 function HomeCheck:setTarget(frame, target)
-    if not target or target == frame.target then
+    if not target or target == frame.target or self.spells[frame.spellID].notarget then
         return
     end
     if self.spells[frame.spellID].noself and target == frame.playerName then
