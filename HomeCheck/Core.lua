@@ -852,11 +852,17 @@ function HomeCheck:cooldownSorter(frame1, frame2)
     local groupIndex = self:getSpellGroup(frame1.spellID)
     local spellId1 = self.spells[frame1.spellID].parent or frame1.spellID
     local spellId2 = self.spells[frame2.spellID].parent or frame2.spellID
-    if self:getUnit(frame1.playerName).dead
-            and not self:getUnit(frame2.playerName).dead
-            and spellId1 == spellId2 then
-        return true
-    elseif self:getUnit(frame1.playerName).range < self:getUnit(frame2.playerName).range then
+
+    if spellId1 == spellId2 then
+        if self:getUnit(frame1.playerName).dead
+                and not self:getUnit(frame2.playerName).dead then
+            return true
+        elseif self:getUnit(frame1.playerName).dead ~= self:getUnit(frame2.playerName).dead then
+            return
+        end
+    end
+
+    if self:getUnit(frame1.playerName).range < self:getUnit(frame2.playerName).range then
         if self:getIProp(groupIndex, "rangeUngroup") then
             return true
         elseif spellId1 == spellId2 and self:getIProp(groupIndex, "rangeDimout") then
