@@ -59,7 +59,7 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, combatEvent, _, playerName, _, _, targetName, _, spellID, spellName = ...
 
-        if combatEvent == "UNIT_DIED" then
+        if combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             playerName = targetName
         end
 
@@ -85,7 +85,7 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
                 -- Guardian Spirit proced
                 self:GSProc(targetName)
             end
-        elseif combatEvent == "UNIT_DIED" then
+        elseif combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             self:getUnit(playerName).dead = true
         end
 
