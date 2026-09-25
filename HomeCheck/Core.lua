@@ -131,6 +131,16 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
             or event == "UNIT_SPELLCAST_FAILED"
             or event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, spellName, _, targetName = ...
+        -- Only our own casts. The client sends SENT and FAILED for the player
+        -- alone, while SUCCEEDED arrives for other units too - and for them it
+        -- reports the cast being started, not finished. Another druid who
+        -- began a Rebirth and cancelled it therefore looked exactly like one
+        -- who finished it, with no FAILED to take the cooldown back off. Their
+        -- Rebirths are still caught by the combat log, which only speaks once
+        -- the cast is done.
+        if unit ~= "player" then
+            return
+        end
         if self.localizedSpellNames[spellName] == 48477 then
             self:Rebirth(event, (UnitName(unit)), targetName)
         end
