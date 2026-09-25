@@ -67,6 +67,11 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
+        -- The Guardian Spirit heal (48153) carries the same name as the talent
+        -- that fires it (47788), so the lookup below turns its id into the
+        -- talent's and the test for the heal could never match. Read it first.
+        local healSpellID = spellID
+
         if spellID and not self.spells[spellID] then
             spellID = self.localizedSpellNames[spellName]
         end
@@ -81,7 +86,7 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
                 self:setCooldown(spellID, playerName, true, targetName)
             end
         elseif combatEvent == "SPELL_HEAL" then
-            if spellID == 48153 then
+            if healSpellID == 48153 then
                 -- Guardian Spirit proced
                 self:GSProc(targetName)
             end
