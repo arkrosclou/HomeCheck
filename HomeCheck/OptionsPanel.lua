@@ -748,6 +748,19 @@ function HomeCheck:OptionsPanel()
                             return self.db.profile.spells[spellID].alwaysShow
                         end
                     },
+                    announce = {
+                        name = L["Announce"],
+                        type = "toggle",
+                        desc = L["Announce this spell to chat when it is used. Needs \"Announce cooldowns to chat\" in the general options."],
+                        order = 3,
+                        disabled = not self.db.profile.spells[spellID].enable,
+                        set = function(_, val)
+                            self.db.profile.spells[spellID].announce = val
+                        end,
+                        get = function(_)
+                            return self.db.profile.spells[spellID].announce
+                        end
+                    },
                     frame = {
                         name = L["Frame"],
                         type = "range",
