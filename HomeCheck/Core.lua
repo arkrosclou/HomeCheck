@@ -90,6 +90,23 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
+        if combatEvent == "SPELL_HEAL" then
+            -- The one heal that matters here, and its id has to be read before
+            -- the name lookup further down: the Guardian Spirit heal (48153)
+            -- carries the name of the talent that fires it (47788), so that
+            -- lookup turned it into the talent's id and the test below could
+            -- never match.
+            if spellID ~= 48153 then
+                return
+            end
+            if not UnitInRaid(playerName) and not UnitInParty(playerName) then
+                return
+            end
+            -- Guardian Spirit proced
+            self:GSProc(targetName)
+            return
+        end
+
         if combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             playerName = targetName
         elseif spellID then
@@ -115,11 +132,6 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
                 -- evaluate nocast to skip spells that also trigger SPELL_CAST_SUCCESS (prevent double cooldown trigger)
                 self:setCooldown(spellID, playerName, true, targetName)
             end
-        elseif combatEvent == "SPELL_HEAL" then
-            if spellID == 48153 then
-                -- Guardian Spirit proced
-                self:GSProc(targetName)
-            end
         elseif combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             self:getUnit(playerName).dead = true
         end
@@ -129,6 +141,16 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
             or event == "UNIT_SPELLCAST_FAILED"
             or event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, spellName, _, targetName = ...
+        -- Only our own casts. The client sends SENT and FAILED for the player
+        -- alone, while SUCCEEDED arrives for other units too - and for them it
+        -- reports the cast being started, not finished. Another druid who
+        -- began a Rebirth and cancelled it therefore looked exactly like one
+        -- who finished it, with no FAILED to take the cooldown back off. Their
+        -- Rebirths are still caught by the combat log, which only speaks once
+        -- the cast is done.
+        if unit ~= "player" then
+            return
+        end
         if self.localizedSpellNames[spellName] == 48477 then
             self:Rebirth(event, (UnitName(unit)), targetName)
         end
@@ -1216,12 +1238,19 @@ function HomeCheck:getTarget(playerName, spellID)
     end
 end
 
+-- Returns the target the bar carries after the call, so "nothing changed" and
+-- "there is no target" stay apart: the caller decides by that answer whether
+-- to go looking for a target elsewhere, and a bar that already showed the
+-- right one used to look to it like a bar with none.
 function HomeCheck:setTarget(frame, target)
-    if not target or target == frame.target or self.spells[frame.spellID].notarget then
-        return
+    if not target or self.spells[frame.spellID].notarget then
+        return frame.target
+    end
+    if target == frame.target then
+        return target
     end
     if self.spells[frame.spellID].noself and target == frame.playerName then
-        return
+        return frame.target
     end
     frame.target = target
     self.db.global.CDs[frame.playerName][frame.spellID].target = target
@@ -1464,15 +1493,26 @@ function HomeCheck:setTimerPosition(frame)
     end
 end
 
+-- A cast and its proc (Misdirection, Tricks of the Trade) share one line in
+-- the options, and these three read the setting behind that line.
+--
+-- They used to read it as "parent and parentSetting or ownSetting", which only
+-- works while the parent's setting is true: a false one falls through to the
+-- other half of the pair, whose own setting is a leftover nobody edits and
+-- which defaults to true. Turning such a spell off in the options therefore
+-- did nothing at all. The spell the line stands for is picked first now, and
+-- its setting is returned whatever it is.
+function HomeCheck:getSpellSetting(spellID, setting)
+    local spell = self.spells[spellID]
+    return self.db.profile.spells[spell and spell.parent or spellID][setting]
+end
+
 function HomeCheck:getSpellAlwaysShow(spellID)
-    return self.spells[spellID]
-            and self.spells[spellID].parent
-            and self.db.profile.spells[self.spells[spellID].parent].alwaysShow
-            or self.db.profile.spells[spellID].alwaysShow
+    return self:getSpellSetting(spellID, "alwaysShow")
 end
 
 function HomeCheck:isSpellEnabled(spellID)
-    return self.spells[spellID].parent and self.db.profile.spells[self.spells[spellID].parent].enable or self.db.profile.spells[spellID].enable
+    return self:getSpellSetting(spellID, "enable")
 end
 
 ---A cast/proc pair is one line in the options, so the pair follows the setting
@@ -1484,7 +1524,7 @@ function HomeCheck:isSpellAnnounced(spellID)
 end
 
 function HomeCheck:isSpellTanksOnly(spellID)
-    return self.spells[spellID].parent and self.db.profile.spells[self.spells[spellID].parent].tanksonly or self.db.profile.spells[spellID].tanksonly
+    return self:getSpellSetting(spellID, "tanksonly")
 end
 
 function HomeCheck:Rebirth(event, playerName, target)
