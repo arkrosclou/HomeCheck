@@ -839,11 +839,11 @@ end
 ---"Playername [Spell] (Target)", the target left out when there is none or the
 ---spell hits everybody anyway.
 ---The line every message here is built from: the spell first, then who used it
----and on whom - "[Guardian Spirit] (Krizy)", "[Misdirection] (Krizy > Tank)".
+---and on whom - "[Guardian Spirit] (Krizy)", "[Misdirection] (Krizy -> Tank)".
 function HomeCheck:getChatMessage(playerName, spellID, target)
     local message = (GetSpellLink(spellID) or (GetSpellInfo(spellID)) or tostring(spellID)) .. " (" .. playerName
     if target and not self.spells[spellID].notarget then
-        message = message .. " > " .. target
+        message = message .. " -> " .. target
     end
     return message .. ")"
 end
