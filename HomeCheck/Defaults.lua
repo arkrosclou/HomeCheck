@@ -16,6 +16,7 @@ HomeCheck.defaults = {
             FRCD3 = true
         },
         link = true,
+        autoannounce = false,
         selfignore = false,
         hidesolo = false,
         testMode = false
