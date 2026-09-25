@@ -722,13 +722,10 @@ function HomeCheck:EnableMouse(frame, disable)
     else
         frame:SetScript("OnMouseDown", function(_, button)
             if button == "LeftButton" and (IsShiftKeyDown() or IsControlKeyDown()) then
-                local message = frame.playerName .. " " .. (GetSpellLink(frame.spellID))
+                local message = self:getChatMessage(frame.playerName, frame.spellID, frame.target)
                 if frame.CDLeft == 0 then
                     message = message .. " READY"
                 else
-                    if frame.target then
-                        message = message .. " (" .. frame.target .. ")"
-                    end
                     message = message .. " " .. date("!%M:%S", frame.CDLeft)
                 end
                 if IsShiftKeyDown() then
@@ -841,12 +838,14 @@ end
 
 ---"Playername [Spell] (Target)", the target left out when there is none or the
 ---spell hits everybody anyway.
-function HomeCheck:getAnnounceMessage(playerName, spellID, target)
-    local message = playerName .. " " .. (GetSpellLink(spellID) or (GetSpellInfo(spellID)) or tostring(spellID))
+---The line every message here is built from: the spell first, then who used it
+---and on whom - "[Guardian Spirit] (Krizy)", "[Misdirection] (Krizy > Tank)".
+function HomeCheck:getChatMessage(playerName, spellID, target)
+    local message = (GetSpellLink(spellID) or (GetSpellInfo(spellID)) or tostring(spellID)) .. " (" .. playerName
     if target and not self.spells[spellID].notarget then
-        message = message .. " (" .. target .. ")"
+        message = message .. " > " .. target
     end
-    return message
+    return message .. ")"
 end
 
 function HomeCheck:announceCooldown(playerName, spellID, target)
@@ -862,7 +861,7 @@ function HomeCheck:announceCooldown(playerName, spellID, target)
     if not channel or not self:shouldAnnounce(playerName) then
         return
     end
-    ChatThrottleLib:SendChatMessage("NORMAL", "HomeCheck", self:getAnnounceMessage(playerName, spellID, target), channel)
+    ChatThrottleLib:SendChatMessage("NORMAL", "HomeCheck", self:getChatMessage(playerName, spellID, target), channel)
 end
 
 --- called when group sizing changes (icon, padding, etc.), or titleBar is toggled, or cooldown frame is added or removed
