@@ -767,6 +767,9 @@ function HomeCheck:announceCooldown(playerName, spellID, target)
         -- the cast itself was announced already, when it was used
         return
     end
+    if not self:isSpellAnnounced(spellID) then
+        return
+    end
     local channel = announceChannel()
     if not channel or not self:shouldAnnounce(playerName) then
         return
@@ -1375,6 +1378,14 @@ end
 
 function HomeCheck:isSpellEnabled(spellID)
     return self.spells[spellID].parent and self.db.profile.spells[self.spells[spellID].parent].enable or self.db.profile.spells[spellID].enable
+end
+
+---A cast/proc pair is one line in the options, so the pair follows the setting
+---of the spell that line stands for. Written out rather than with and/or: the
+---setting is a boolean, and false has to stay false instead of falling through
+---to the other half of the pair.
+function HomeCheck:isSpellAnnounced(spellID)
+    return self.db.profile.spells[self.spells[spellID].parent or spellID].announce
 end
 
 function HomeCheck:isSpellTanksOnly(spellID)

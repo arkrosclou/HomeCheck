@@ -60,3 +60,5 @@ L["Title bar height"] = true
 L["Title font size"] = true
 L["Title background color"] = true
 L["Does not check actual spell range. Used mostly to filter players in different realm on Halion."] = true
+L["Announce"] = true
+L["Announce this spell to chat when it is used. Needs \"Announce cooldowns to chat\" in the general options."] = true

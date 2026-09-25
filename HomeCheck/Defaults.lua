@@ -58,7 +58,8 @@ HomeCheck.defaults = {
         spells = {
             ["**"] = {
                 group = 2,
-                priority = 100
+                priority = 100,
+                announce = true
             },
             -- DSac
             [64205] = {
