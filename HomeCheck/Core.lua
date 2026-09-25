@@ -32,6 +32,9 @@ local updateRaidRosterScheduleTimer
 
 local childSpells = {}
 
+-- bars that were removed, waiting to be handed out again
+local framePool = {}
+
 -- the only combat log events this addon acts on
 local combatLogEvents = {
     SPELL_CAST_SUCCESS = true,
@@ -590,7 +593,39 @@ function HomeCheck:createCooldownFrame(playerName, spellID, testMode)
     end
 
     local group = self:getGroup(self:getSpellGroup(spellID))
-    frame = CreateFrame("Frame", nil, group)
+
+    -- A bar is built once and kept: frames are never collected by the garbage
+    -- collector, so a raid's worth of cooldowns coming and going would leave
+    -- hundreds of them behind. A released bar waits in the pool instead.
+    frame = table.remove(framePool)
+    if frame then
+        frame:SetParent(group)
+        frame:ClearAllPoints()
+        frame:Show()
+    else
+        frame = CreateFrame("Frame", nil, group)
+
+        frame.icon = frame:CreateTexture(nil, "OVERLAY")
+        frame.icon:SetPoint("LEFT")
+
+        frame.bar = CreateFrame("Frame", nil, frame)
+        frame.bar:SetPoint("TOPLEFT", frame.icon, "TOPRIGHT")
+        frame.bar:SetPoint("BOTTOMRIGHT")
+
+        frame.bar.active = frame.bar:CreateTexture(nil, "ARTWORK")
+        frame.bar.active:SetPoint("LEFT")
+        frame.bar.inactive = frame.bar:CreateTexture(nil, "ARTWORK")
+        frame.bar.inactive:SetPoint("RIGHT")
+        frame.bar.inactive:SetPoint("LEFT", frame.bar.active, "RIGHT")
+
+        frame.playerNameFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        frame.playerNameFontString:SetTextColor(1, 1, 1, 1)
+
+        frame.targetFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        frame.targetFontString:SetPoint("LEFT", frame.playerNameFontString, "RIGHT", 1, 0)
+
+        frame.timerFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    end
 
     frame.playerName = playerName
     frame.spellID = spellID
@@ -602,34 +637,23 @@ function HomeCheck:createCooldownFrame(playerName, spellID, testMode)
     frame.CD = self:getSpellCooldown(frame)
     frame.testMode = testMode
 
-    frame.icon = frame:CreateTexture(nil, "OVERLAY")
-    frame.icon:SetPoint("LEFT")
+    -- whatever the previous holder of this bar left behind
+    frame.target = nil
+    frame.isRemote = nil
+    frame.initialized = nil
+    frame.ticking = nil
+    frame.timerText = nil
+    frame.timerColorState = nil
+    frame.barColorDimmed, frame.barColorOpacity, frame.barColorClass = nil, nil, nil
+
     frame.icon:SetTexture(select(3, GetSpellInfo(spellID)))
-
-    frame.bar = CreateFrame("Frame", nil, frame)
-    frame.bar:SetPoint("TOPLEFT", frame.icon, "TOPRIGHT")
-    frame.bar:SetPoint("BOTTOMRIGHT")
-
-    frame.bar.active = frame.bar:CreateTexture(nil, "ARTWORK")
-    frame.bar.active:SetPoint("LEFT")
-    frame.bar.inactive = frame.bar:CreateTexture(nil, "ARTWORK")
-    frame.bar.inactive:SetPoint("RIGHT")
-    frame.bar.inactive:SetPoint("LEFT", frame.bar.active, "RIGHT")
-
-    frame.playerNameFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.playerNameFontString:SetText(frame.playerName)
-    frame.playerNameFontString:SetTextColor(1, 1, 1, 1)
-
-    frame.targetFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.targetFontString:SetPoint("LEFT", frame.playerNameFontString, "RIGHT", 1, 0)
-
-    frame.timerFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.playerNameFontString:SetText(playerName)
+    frame.targetFontString:SetText("")
+    frame.timerFontString:SetText("")
 
     self:applyGroupSettings(frame)
 
-    if self.db.global.link then
-        self:EnableMouse(frame)
-    end
+    self:EnableMouse(frame, not self.db.global.link)
 
     table.insert(group.CooldownFrames, frame)
     self:updateFramesVisibility(self:getSpellGroup(spellID))
@@ -709,9 +733,10 @@ function HomeCheck:removeCooldownFrames(playerName, spellID, onlyWhenReady, star
             ) or (
                     testMode and self.groups[i].CooldownFrames[j].testMode
             ) then
-                self.groups[i].CooldownFrames[j]:Hide()
-                self.groups[i].CooldownFrames[j].ticking = nil
-                table.remove(self.groups[i].CooldownFrames, j)
+                local released = table.remove(self.groups[i].CooldownFrames, j)
+                released:Hide()
+                released.ticking = nil
+                framePool[#framePool + 1] = released
                 self:updateFramesVisibility(i)
                 if spellID then
                     break
