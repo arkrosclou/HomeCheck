@@ -32,6 +32,16 @@ local updateRaidRosterScheduleTimer
 
 local childSpells = {}
 
+-- the only combat log events this addon acts on
+local combatLogEvents = {
+    SPELL_CAST_SUCCESS = true,
+    SPELL_RESURRECT = true,
+    SPELL_AURA_APPLIED = true,
+    SPELL_HEAL = true,
+    UNIT_DIED = true,
+    SPELL_INSTAKILL = true
+}
+
 local groups = 10
 
 local date, floor, GetTime, pairs, select, string, strsplit, table, time, tonumber, tostring, type, unpack = date, floor, GetTime, pairs, select, {
@@ -59,16 +69,28 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, combatEvent, _, playerName, _, _, targetName, _, spellID, spellName = ...
 
+        -- The combat log fires thousands of times a second in a raid, and all
+        -- but a handful of those events mean nothing here. Both tests below are
+        -- table lookups, and they come before the roster calls, which search
+        -- the raid by name and are the expensive part.
+        if not combatLogEvents[combatEvent] then
+            return
+        end
+
         if combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             playerName = targetName
+        elseif spellID then
+            if not self.spells[spellID] then
+                spellID = self.localizedSpellNames[spellName]
+            end
+            if not spellID then
+                -- a spell nobody here tracks
+                return
+            end
         end
 
         if not UnitInRaid(playerName) and not UnitInParty(playerName) then
             return
-        end
-
-        if spellID and not self.spells[spellID] then
-            spellID = self.localizedSpellNames[spellName]
         end
 
         if combatEvent == "SPELL_CAST_SUCCESS" or combatEvent == "SPELL_RESURRECT" then
