@@ -1072,12 +1072,19 @@ function HomeCheck:getTarget(playerName, spellID)
     end
 end
 
+-- Returns the target the bar carries after the call, so "nothing changed" and
+-- "there is no target" stay apart: the caller decides by that answer whether
+-- to go looking for a target elsewhere, and a bar that already showed the
+-- right one used to look to it like a bar with none.
 function HomeCheck:setTarget(frame, target)
-    if not target or target == frame.target or self.spells[frame.spellID].notarget then
-        return
+    if not target or self.spells[frame.spellID].notarget then
+        return frame.target
+    end
+    if target == frame.target then
+        return target
     end
     if self.spells[frame.spellID].noself and target == frame.playerName then
-        return
+        return frame.target
     end
     frame.target = target
     self.db.global.CDs[frame.playerName][frame.spellID].target = target
