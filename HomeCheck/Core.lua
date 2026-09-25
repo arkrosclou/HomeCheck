@@ -80,6 +80,23 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
+        if combatEvent == "SPELL_HEAL" then
+            -- The one heal that matters here, and its id has to be read before
+            -- the name lookup further down: the Guardian Spirit heal (48153)
+            -- carries the name of the talent that fires it (47788), so that
+            -- lookup turned it into the talent's id and the test below could
+            -- never match.
+            if spellID ~= 48153 then
+                return
+            end
+            if not UnitInRaid(playerName) and not UnitInParty(playerName) then
+                return
+            end
+            -- Guardian Spirit proced
+            self:GSProc(targetName)
+            return
+        end
+
         if combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             playerName = targetName
         elseif spellID then
@@ -104,11 +121,6 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
             if self.spells[spellID] and self.spells[spellID].nocast then
                 -- evaluate nocast to skip spells that also trigger SPELL_CAST_SUCCESS (prevent double cooldown trigger)
                 self:setCooldown(spellID, playerName, true, targetName)
-            end
-        elseif combatEvent == "SPELL_HEAL" then
-            if spellID == 48153 then
-                -- Guardian Spirit proced
-                self:GSProc(targetName)
             end
         elseif combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             self:getUnit(playerName).dead = true
