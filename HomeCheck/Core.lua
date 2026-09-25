@@ -42,6 +42,19 @@ local updateRaidRosterScheduleTimer
 
 local childSpells = {}
 
+-- bars that were removed, waiting to be handed out again
+local framePool = {}
+
+-- the only combat log events this addon acts on
+local combatLogEvents = {
+    SPELL_CAST_SUCCESS = true,
+    SPELL_RESURRECT = true,
+    SPELL_AURA_APPLIED = true,
+    SPELL_HEAL = true,
+    UNIT_DIED = true,
+    SPELL_INSTAKILL = true
+}
+
 local groups = 10
 
 local date, floor, GetTime, pairs, select, string, strsplit, table, time, tonumber, tostring, type, unpack = date, floor, GetTime, pairs, select, {
@@ -69,16 +82,28 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, combatEvent, _, playerName, _, _, targetName, _, spellID, spellName = ...
 
+        -- The combat log fires thousands of times a second in a raid, and all
+        -- but a handful of those events mean nothing here. Both tests below are
+        -- table lookups, and they come before the roster calls, which search
+        -- the raid by name and are the expensive part.
+        if not combatLogEvents[combatEvent] then
+            return
+        end
+
         if combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             playerName = targetName
+        elseif spellID then
+            if not self.spells[spellID] then
+                spellID = self.localizedSpellNames[spellName]
+            end
+            if not spellID then
+                -- a spell nobody here tracks
+                return
+            end
         end
 
         if not UnitInRaid(playerName) and not UnitInParty(playerName) then
             return
-        end
-
-        if spellID and not self.spells[spellID] then
-            spellID = self.localizedSpellNames[spellName]
         end
 
         if combatEvent == "SPELL_CAST_SUCCESS" or combatEvent == "SPELL_RESURRECT" then
@@ -518,35 +543,8 @@ function HomeCheck:setCooldown(spellID, playerName, CDLeft, target, isRemote, te
 
     if frame.CDLeft > 0 then
         frame.timerFontString:SetText(date("!%M:%S", frame.CDLeft):gsub('^0+:?0?', ''))
-
-        if not frame.CDtimer then
-            local tick = 0.1
-            frame.CDtimer = self:ScheduleRepeatingTimer(function()
-                frame.CDLeft = frame.CDReady - GetTime()
-
-                if frame.CDLeft <= 0 then
-                    self:CancelTimer(frame.CDtimer)
-                    frame.CDtimer = nil
-                    table.wipe(self.db.global.CDs[playerName][spellID])
-                    if not self:getSpellAlwaysShow(spellID) then
-                        self:removeCooldownFrames(playerName, spellID)
-                        self:repositionFrames(self:getSpellGroup(spellID))
-                        return
-                    else
-                        if frame.CDLeft < 0 then
-                            frame.CDLeft = 0
-                        end
-                        frame.timerFontString:SetText("R")
-                        self:setTimerColor(frame)
-                    end
-                elseif frame.timerText ~= floor(frame.CDLeft) then
-                    frame.timerText = floor(frame.CDLeft)
-                    frame.timerFontString:SetText(date("!%M:%S", frame.CDLeft):gsub('^0+:?0?', ''))
-                    self:setTimerColor(frame)
-                end
-                self:updateCooldownBarProgress(frame)
-            end, tick)
-        end
+        -- the shared ticker counts it down from here
+        frame.ticking = true
     elseif not self:getSpellAlwaysShow(spellID) then
         self:removeCooldownFrames(playerName, spellID, true)
         self:repositionFrames(self:getSpellGroup(spellID))
@@ -563,6 +561,53 @@ function HomeCheck:setCooldown(spellID, playerName, CDLeft, target, isRemote, te
 
     frame.initialized = true
 end
+
+---One bar's countdown, a tenth of a second's worth.
+function HomeCheck:tickCooldown(frame)
+    local playerName, spellID = frame.playerName, frame.spellID
+    frame.CDLeft = frame.CDReady - GetTime()
+
+    if frame.CDLeft <= 0 then
+        frame.ticking = nil
+        table.wipe(self.db.global.CDs[playerName][spellID])
+        if not self:getSpellAlwaysShow(spellID) then
+            self:removeCooldownFrames(playerName, spellID)
+            self:repositionFrames(self:getSpellGroup(spellID))
+            return
+        end
+        if frame.CDLeft < 0 then
+            frame.CDLeft = 0
+        end
+        frame.timerFontString:SetText("R")
+        self:setTimerColor(frame)
+    elseif frame.timerText ~= floor(frame.CDLeft) then
+        frame.timerText = floor(frame.CDLeft)
+        frame.timerFontString:SetText(date("!%M:%S", frame.CDLeft):gsub('^0+:?0?', ''))
+        self:setTimerColor(frame)
+    end
+    self:updateCooldownBarProgress(frame)
+end
+
+-- One ticker for every bar on screen, instead of a repeating AceTimer each.
+-- Bars are walked backwards because a bar that just came off cooldown removes
+-- itself from the list it is being walked through.
+local tickElapsed = 0
+HomeCheck:SetScript("OnUpdate", function(self, elapsed)
+    tickElapsed = tickElapsed + elapsed
+    if tickElapsed < 0.1 then
+        return
+    end
+    tickElapsed = 0
+
+    for i = 1, #self.groups do
+        local frames = self.groups[i].CooldownFrames
+        for j = #frames, 1, -1 do
+            if frames[j].ticking then
+                self:tickCooldown(frames[j])
+            end
+        end
+    end
+end)
 
 function HomeCheck:getCooldownFrame(playerName, spellID)
     local group = self:getGroup(self:getSpellGroup(spellID))
@@ -581,7 +626,39 @@ function HomeCheck:createCooldownFrame(playerName, spellID, testMode)
     end
 
     local group = self:getGroup(self:getSpellGroup(spellID))
-    frame = CreateFrame("Frame", nil, group)
+
+    -- A bar is built once and kept: frames are never collected by the garbage
+    -- collector, so a raid's worth of cooldowns coming and going would leave
+    -- hundreds of them behind. A released bar waits in the pool instead.
+    frame = table.remove(framePool)
+    if frame then
+        frame:SetParent(group)
+        frame:ClearAllPoints()
+        frame:Show()
+    else
+        frame = CreateFrame("Frame", nil, group)
+
+        frame.icon = frame:CreateTexture(nil, "OVERLAY")
+        frame.icon:SetPoint("LEFT")
+
+        frame.bar = CreateFrame("Frame", nil, frame)
+        frame.bar:SetPoint("TOPLEFT", frame.icon, "TOPRIGHT")
+        frame.bar:SetPoint("BOTTOMRIGHT")
+
+        frame.bar.active = frame.bar:CreateTexture(nil, "ARTWORK")
+        frame.bar.active:SetPoint("LEFT")
+        frame.bar.inactive = frame.bar:CreateTexture(nil, "ARTWORK")
+        frame.bar.inactive:SetPoint("RIGHT")
+        frame.bar.inactive:SetPoint("LEFT", frame.bar.active, "RIGHT")
+
+        frame.playerNameFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        frame.playerNameFontString:SetTextColor(1, 1, 1, 1)
+
+        frame.targetFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        frame.targetFontString:SetPoint("LEFT", frame.playerNameFontString, "RIGHT", 1, 0)
+
+        frame.timerFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    end
 
     frame.playerName = playerName
     frame.spellID = spellID
@@ -593,34 +670,23 @@ function HomeCheck:createCooldownFrame(playerName, spellID, testMode)
     frame.CD = self:getSpellCooldown(frame)
     frame.testMode = testMode
 
-    frame.icon = frame:CreateTexture(nil, "OVERLAY")
-    frame.icon:SetPoint("LEFT")
+    -- whatever the previous holder of this bar left behind
+    frame.target = nil
+    frame.isRemote = nil
+    frame.initialized = nil
+    frame.ticking = nil
+    frame.timerText = nil
+    frame.timerColorState = nil
+    frame.barColorDimmed, frame.barColorOpacity, frame.barColorClass = nil, nil, nil
+
     frame.icon:SetTexture(select(3, GetSpellInfo(spellID)))
-
-    frame.bar = CreateFrame("Frame", nil, frame)
-    frame.bar:SetPoint("TOPLEFT", frame.icon, "TOPRIGHT")
-    frame.bar:SetPoint("BOTTOMRIGHT")
-
-    frame.bar.active = frame.bar:CreateTexture(nil, "ARTWORK")
-    frame.bar.active:SetPoint("LEFT")
-    frame.bar.inactive = frame.bar:CreateTexture(nil, "ARTWORK")
-    frame.bar.inactive:SetPoint("RIGHT")
-    frame.bar.inactive:SetPoint("LEFT", frame.bar.active, "RIGHT")
-
-    frame.playerNameFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.playerNameFontString:SetText(frame.playerName)
-    frame.playerNameFontString:SetTextColor(1, 1, 1, 1)
-
-    frame.targetFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    frame.targetFontString:SetPoint("LEFT", frame.playerNameFontString, "RIGHT", 1, 0)
-
-    frame.timerFontString = frame.bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    frame.playerNameFontString:SetText(playerName)
+    frame.targetFontString:SetText("")
+    frame.timerFontString:SetText("")
 
     self:applyGroupSettings(frame)
 
-    if self.db.global.link then
-        self:EnableMouse(frame)
-    end
+    self:EnableMouse(frame, not self.db.global.link)
 
     table.insert(group.CooldownFrames, frame)
     self:updateFramesVisibility(self:getSpellGroup(spellID))
@@ -823,11 +889,10 @@ function HomeCheck:removeCooldownFrames(playerName, spellID, onlyWhenReady, star
             ) or (
                     testMode and self.groups[i].CooldownFrames[j].testMode
             ) then
-                self.groups[i].CooldownFrames[j]:Hide()
-                if self.groups[i].CooldownFrames[j].CDtimer then
-                    self:CancelTimer(self.groups[i].CooldownFrames[j].CDtimer)
-                end
-                table.remove(self.groups[i].CooldownFrames, j)
+                local released = table.remove(self.groups[i].CooldownFrames, j)
+                released:Hide()
+                released.ticking = nil
+                framePool[#framePool + 1] = released
                 self:updateFramesVisibility(i)
                 if spellID then
                     break
@@ -1169,25 +1234,55 @@ function HomeCheck:setTarget(frame, target)
     return target
 end
 
+-- Both colour setters run for every bar once a second, and the colour almost
+-- never differs from the one the bar already carries. Each remembers what it
+-- last applied and does nothing until that changes.
 ---@param frame
 function HomeCheck:setBarColor(frame)
-    if self:getUnit(frame.playerName).dead
+    local dimmed = self:getUnit(frame.playerName).dead
             or (self:getUnit(frame.playerName).range == 0
-            and self:getIPropBySpellId(frame.spellID, "rangeDimout")) then
-        frame.bar.active:SetVertexColor(0.5, 0.5, 0.5, self:getIPropBySpellId(frame.spellID, "opacity"))
+            and self:getIPropBySpellId(frame.spellID, "rangeDimout"))
+    local opacity = self:getIPropBySpellId(frame.spellID, "opacity")
+
+    if frame.barColorDimmed == dimmed and frame.barColorOpacity == opacity and frame.barColorClass == frame.class then
+        return
+    end
+    frame.barColorDimmed, frame.barColorOpacity, frame.barColorClass = dimmed, opacity, frame.class
+
+    if dimmed then
+        frame.bar.active:SetVertexColor(0.5, 0.5, 0.5, opacity)
     else
         local playerClassColor = RAID_CLASS_COLORS[frame.class]
-        frame.bar.active:SetVertexColor(playerClassColor.r, playerClassColor.g, playerClassColor.b, self:getIPropBySpellId(frame.spellID, "opacity"))
+        frame.bar.active:SetVertexColor(playerClassColor.r, playerClassColor.g, playerClassColor.b, opacity)
     end
 end
 
+-- what setTimerColor last painted: dead, ready, or counting down
+local TIMER_DEAD, TIMER_READY, TIMER_RUNNING = 1, 2, 3
+
 function HomeCheck:setTimerColor(frame)
+    local state
     if self:getUnit(frame.playerName).dead then
-        frame.timerFontString:SetTextColor(1, 0, 0, 1)
+        state = TIMER_DEAD
     elseif frame.CDLeft <= 0 then
-        if self.db.profile.spells[frame.spellID].alwaysShow then
-            frame.timerFontString:SetTextColor(0, 1, 0, 1)
+        if not self.db.profile.spells[frame.spellID].alwaysShow then
+            -- the bar is on its way out, leave the colour alone
+            return
         end
+        state = TIMER_READY
+    else
+        state = TIMER_RUNNING
+    end
+
+    if frame.timerColorState == state then
+        return
+    end
+    frame.timerColorState = state
+
+    if state == TIMER_DEAD then
+        frame.timerFontString:SetTextColor(1, 0, 0, 1)
+    elseif state == TIMER_READY then
+        frame.timerFontString:SetTextColor(0, 1, 0, 1)
     else
         frame.timerFontString:SetTextColor(0.9, 0.7, 0, 1)
     end
@@ -1435,19 +1530,19 @@ function HomeCheck:setFrameHeight(frame, height)
     self:updateCooldownBarProgress(frame)
 end
 
+-- Title bar properties are never inherited - always use the specific group's settings
+local titleBarProperties = {
+    showTitleBar = true,
+    titleText = true,
+    titleBarHeight = true,
+    titleFontSize = true,
+    titleBackgroundColor = true
+}
+
 ---getIProp
 ---@param frameId number frame group number
 ---@param propertyName string property name to get
 function HomeCheck:getIProp(frameId, propertyName)
-    -- Title bar properties are never inherited - always use the specific group's settings
-    local titleBarProperties = {
-        showTitleBar = true,
-        titleText = true,
-        titleBarHeight = true,
-        titleFontSize = true,
-        titleBackgroundColor = true
-    }
-
     if titleBarProperties[propertyName] then
         return self.db.profile[frameId][propertyName]
     else
