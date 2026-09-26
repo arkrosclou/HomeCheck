@@ -32,16 +32,6 @@ local updateRaidRosterScheduleTimer
 
 local childSpells = {}
 
--- the only combat log events this addon acts on
-local combatLogEvents = {
-    SPELL_CAST_SUCCESS = true,
-    SPELL_RESURRECT = true,
-    SPELL_AURA_APPLIED = true,
-    SPELL_HEAL = true,
-    UNIT_DIED = true,
-    SPELL_INSTAKILL = true
-}
-
 local groups = 10
 
 local date, floor, GetTime, pairs, select, string, strsplit, table, time, tonumber, tostring, type, unpack = date, floor, GetTime, pairs, select, {
@@ -65,6 +55,16 @@ function HomeCheck:LibGroupTalents_RoleChange(...)
     self:LibGroupTalents_Update(...)
 end
 
+-- the only combat log events this addon acts on
+local combatLogEvents = {
+    SPELL_CAST_SUCCESS = true,
+    SPELL_RESURRECT = true,
+    SPELL_AURA_APPLIED = true,
+    SPELL_HEAL = true,
+    UNIT_DIED = true,
+    SPELL_INSTAKILL = true
+}
+
 HomeCheck:SetScript("OnEvent", function(self, event, ...)
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, combatEvent, _, playerName, _, _, targetName, _, spellID, spellName = ...
@@ -79,7 +79,7 @@ HomeCheck:SetScript("OnEvent", function(self, event, ...)
 
         if combatEvent == "UNIT_DIED" or combatEvent == "SPELL_INSTAKILL" then
             playerName = targetName
-        elseif spellID then
+        else
             if not self.spells[spellID] then
                 spellID = self.localizedSpellNames[spellName]
             end
